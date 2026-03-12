@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dino Dash: Cinematic Realism</title>
+    <style>
+        body { margin: 0; background: #000; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
+        #app { position: relative; width: 100vw; height: 100vh; }
+        canvas { display: block; filter: saturate(1.2) contrast(1.1); }
+        .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(0,0,0,0.8); backdrop-filter: blur(15px); z-index: 100; color: white; }
+        .btn { width: 220px; padding: 15px; margin: 10px; border: 1px solid #555; background: rgba(255,255,255,0.05); color: white; cursor: pointer; border-radius: 4px; letter-spacing: 2px; transition: 0.3s; }
+        .btn:hover { background: white; color: black; box-shadow: 0 0 30px var(--p-clr); }
+        #hud { position: absolute; top: 40px; width: 100%; text-align: center; color: white; font-size: 35px; font-weight: 900; z-index: 50; text-shadow: 0 0 20px #000; pointer-events: none; }
+    </style>
+</head>
+<body>
+
+<div id="app">
+    <div id="hud" style="display:none">0%</div>
+    <div id="menu" class="overlay">
+        <h1 style="letter-spacing: 15px; font-size: 50px;">ULTRA REALISM</h1>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+            <button class="btn" style="--p-clr:#00ff41" onclick="start(0)">DINO EASY</button>
+            <button class="btn" style="--p-clr:#ff0055" onclick="start(3)">DASH PRO</button>
+            <button class="btn" style="--p-clr:#00e1ff" onclick="start(1)">DINO MED</button>
+            <button class="btn" style="--p-clr:#a600ff" onclick="start(4)">DASH ELITE</button>
+            <button class="btn" style="--p-clr:#ffcc00" onclick="start(2)">DINO HARD</button>
+            <button class="btn" style="--p-clr:#fff" onclick="start(5)">INSANE</button>
+        </div>
+    </div>
+    <canvas id="c"></canvas>
+</div>
+
+<script>
+    const canvas = document.getElementById('c');
+    const ctx = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const levels = [
+        { speed: 9, grav: 0.9, jump: -18, clr: "#00ff41", target: 100 },
+        { speed: 12, grav: 1.2, jump: -21, clr: "#00e1ff", target: 150 },
+        { speed: 17, grav: 1.7, jump: -27, clr: "#ffcc00", target: 200 },
+        { speed: 11, grav: 1.1, jump: -19, clr: "#ff0055", target: 150 },
+        { speed: 15, grav: 1.5, jump: -24, clr: "#a600ff", target: 200 },
+        { speed: 20, grav: 2.1, jump: -32, clr: "#ffffff", target: 300 }
+    ];
+
+    let state = 'MENU', current, score = 0, time = 0, weatherType = 'rain';
+    let player = { y: 0, vY: 0, rot: 0 };
+    let obstacles = [], particles = [], weatherDrops = [], clouds = [];
+    let jumpPressed = false;
+
+    // Inizializzazione Nuvole e Meteo
+    function initEnv() {
+        weatherDrops = []; clouds = [];
+        weatherType = ['rain', 'snow'][Math.floor(Math.random()*2)];
+        for(let i=0; i<150; i++) weatherDrops.push({ x: Math.random()*canvas.width, y: Math.random()*canvas.height, v: 10+Math.random()*10, l: 15+Math.random()*10, w: Math.random()*2 });
+        for(let i=0; i<5; i++) clouds.push({ x: Math.random()*canvas.width, y: 50+Math.random()*150, s: 0.2+Math.random()*0.5, w: 200+Math.random()*200 });
+    }
+
+    function start(idx) {
+        current = levels[idx];
+        current.mode = idx < 3 ? 'dino' : 'dash';
+        state = 'PLAYING';
+        document.getElementById('menu').style.display = 'none';
+        document.getElementById('hud').style.display = 'block';
+        initEnv();
+        resetPlayer();
+        loop();
+    }
+
+    function resetPlayer() {
+        player.y = 0; player.vY = 0; player.rot = 0;
+        obstacles = []; score = 0;
+    }
+
+    function drawSky() {
+        time += 0.002;
+        let dayCycle = (Math.sin(time) + 1) / 2; // 0 a 1
+        let grd = ctx.createLinearGradient(0, 0, 0, canvas.height);
+        // Colori: Notte -> Tramonto -> Giorno
+        if(dayCycle < 0.3) {
+            grd.addColorStop(0, '#050510'); grd.addColorStop(1, '#1a1a2e');
+        } else if(dayCycle < 0.6) {
+            grd.addColorStop(0, '#ff7e5f'); grd.addColorStop(1, '#feb47b'); // Tramonto
+        } else {
+            grd.addColorStop(0, '#00b4db'); grd.addColorStop(1, '#0083b0'); // Giorno
+        }
+        ctx.fillStyle = grd; ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Stelle soffuse se notte
+        if(dayCycle < 0.4) {
+            ctx.fillStyle = "white"; ctx.globalAlpha = 1 - (dayCycle * 2.5);
+            for(let i=0; i<50; i++) ctx.fillRect((i*137)%canvas.width, (i*512)%canvas.height, 1.5, 1.5);
+            ctx.globalAlpha = 1;
+        }
+    }
+
+    function drawClouds() {
+        ctx.fillStyle = "rgba(255,255,255,0.15)";
+        clouds.forEach(c => {
+            c.x -= current.speed * 0.2;
+            if(c.x + c.w < 0) c.x = canvas.width;
+            ctx.beginPath();
+            ctx.ellipse(c.x, c.y, c.w, c.w/3, 0, 0, Math.PI*2);
+            ctx.fill();
+        });
+    }
+
+    function drawWeather() {
+        const groundY = canvas.height * 0.85;
+        ctx.lineWidth = 1.5;
+        weatherDrops.forEach(d => {
+            d.y += d.v; d.x += weatherType === 'rain' ? 2 : Math.sin(d.y/30);
+            if(d.y > groundY) {
+                // Splash effect
+                if(weatherType === 'rain' && Math.random() > 0.8) {
+                    particles.push({x: d.x, y: groundY, vX: (Math.random()-0.5)*4, vY: -Math.random()*3, life: 0.5, c: "rgba(200,200,255,0.5)"});
+                }
+                d.y = -20; d.x = Math.random()*canvas.width;
+            }
+            ctx.strokeStyle = weatherType === 'rain' ? "rgba(174,194,224,0.4)" : "rgba(255,255,255,0.8)";
+            ctx.beginPath();
+            if(weatherType === 'rain') { ctx.moveTo(d.x, d.y); ctx.lineTo(d.x+2, d.y+d.l); }
+            else { ctx.arc(d.x, d.y, 2.5, 0, Math.PI*2); }
+            ctx.stroke();
+        });
+    }
+
+    function update() {
+        const groundY = canvas.height * 0.85;
+        player.vY += current.grav;
+        player.y += player.vY;
+
+        if (player.y >= groundY - 45) {
+            player.y = groundY - 45; player.vY = 0;
+            player.rot = Math.round(player.rot / 90) * 90;
+            if (jumpPressed) player.vY = current.jump;
+        } else {
+            player.rot += current.speed * 0.6;
+        }
+
+        particles.forEach((p, i) => {
+            p.x += p.vX; p.y += p.vY; p.life -= 0.02;
+            if(p.life <= 0) particles.splice(i, 1);
+        });
+
+        // Spawn Ostacoli
+        if(obstacles.length === 0 || obstacles[obstacles.length-1].x < canvas.width - 600) {
+            let type = (current.mode === 'dash' && Math.random() > 0.4) ? 'block' : 'spike';
+            let yPos = type === 'block' && Math.random() > 0.5 ? groundY - 130 : groundY - 45;
+            obstacles.push({ x: canvas.width + 100, y: yPos, w: 45, h: 45, t: type });
+        }
+
+        obstacles.forEach((obj, i) => {
+            obj.x -= current.speed;
+            if(obj.x < 220 && obj.x + obj.w > 180 && player.y + 45 > obj.y && player.y < obj.y + 45) {
+                if(obj.t === 'block' && player.vY > 0 && player.y < obj.y) {
+                    player.y = obj.y - 45; player.vY = 0;
+                    if (jumpPressed) player.vY = current.jump;
+                } else { resetPlayer(); }
+            }   
+            if(obj.x < -100) {
+                obstacles.splice(i, 1); score++;
+                document.getElementById('hud').innerText = Math.min(Math.floor((score/current.target)*100), 100) + "%";
+                if(score >= current.target) location.reload();
+            }
+        });
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        drawSky();
+        drawClouds();
+        
+        const groundY = canvas.height * 0.85;
+        // Suolo con texture
+        ctx.fillStyle = "#0a0a0a"; ctx.fillRect(0, groundY, canvas.width, canvas.height - groundY);
+        ctx.strokeStyle = current.clr; ctx.lineWidth = 4; ctx.strokeRect(0, groundY, canvas.width, 2);
+
+        drawWeather();
+
+        // Ostacoli con ombra realistica
+        obstacles.forEach(obj => {
+            ctx.shadowBlur = 20; ctx.shadowColor = obj.t === 'spike' ? 'red' : 'white';
+            if(obj.t === 'spike') {
+                ctx.fillStyle = "#200"; ctx.beginPath(); ctx.moveTo(obj.x, groundY); ctx.lineTo(obj.x+22, groundY-45); ctx.lineTo(obj.x+45, groundY); ctx.fill();
+            } else {
+                ctx.fillStyle = "#111"; ctx.fillRect(obj.x, obj.y, 45, 45);
+                ctx.strokeStyle = "white"; ctx.strokeRect(obj.x, obj.y, 45, 45);
+            }
+        });
+        ctx.shadowBlur = 0;
+
+        // Particelle Splash
+        particles.forEach(p => {
+            ctx.fillStyle = p.c; ctx.globalAlpha = p.life;
+            ctx.fillRect(p.x, p.y, 3, 3);
+        });
+        ctx.globalAlpha = 1;
+
+        // Player Cinematico
+        ctx.save();
+        ctx.translate(200, player.y + 22.5);
+        ctx.rotate(player.rot * Math.PI / 180);
+        let pGrd = ctx.createRadialGradient(0,0,5, 0,0,30);
+        pGrd.addColorStop(0, current.clr); pGrd.addColorStop(1, "#000");
+        ctx.fillStyle = pGrd; ctx.shadowBlur = 25; ctx.shadowColor = current.clr;
+        ctx.fillRect(-22.5, -22.5, 45, 45);
+        ctx.strokeStyle = "white"; ctx.lineWidth = 2; ctx.strokeRect(-22.5, -22.5, 45, 45);
+        ctx.fillStyle = "white"; ctx.font = "bold 20px Arial"; ctx.fillText("°_°", -15, 8);
+        ctx.restore();
+    }
+
+    function loop() {
+        if(state === 'PLAYING') { update(); draw(); requestAnimationFrame(loop); }
+    }
+
+    const setKey = (v) => jumpPressed = v;
+    window.addEventListener('keydown', e => { if(e.code === 'Space') setKey(true); if(e.code === 'Escape') location.reload(); });
+    window.addEventListener('keyup', e => setKey(false));
+    window.addEventListener('mousedown', () => setKey(true));
+    window.addEventListener('mouseup', () => setKey(false));
+    window.addEventListener('touchstart', (e) => { e.preventDefault(); setKey(true); });
+    window.addEventListener('touchend', () => setKey(false));
+</script>
+</body>
+</html>
+
